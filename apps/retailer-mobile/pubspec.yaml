@@ -18,16 +18,16 @@ dependencies:
   # Networking
   dio: ^5.4.0
   retrofit: ^4.1.0
-  connectivity_plus: ^5.0.2
+  connectivity_plus: ^7.0.0
   
   # Local Storage
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   shared_preferences: ^2.2.2
-  flutter_secure_storage: ^9.0.0
+  flutter_secure_storage: ^10.0.0
   
   # Navigation
-  go_router: ^13.1.0
+  go_router: ^17.0.1
   
   # UI Components
   flutter_animate: ^4.5.0
@@ -35,48 +35,48 @@ dependencies:
   cached_network_image: ^3.3.1
   flutter_svg: ^2.0.9
   lottie: ^3.0.0
-  fl_chart: ^0.66.0
-  syncfusion_flutter_charts: ^24.1.41
-  syncfusion_flutter_datagrid: ^24.1.41
+  fl_chart: ^1.1.1
+  syncfusion_flutter_charts: ^32.1.23
+  syncfusion_flutter_datagrid: ^32.1.23
   
   # Forms & Validation
-  flutter_form_builder: ^9.2.0
-  form_builder_validators: ^9.1.0
+  flutter_form_builder: ^10.2.0
+  form_builder_validators: ^11.2.0
   
   # Authentication
-  local_auth: ^2.1.8
+  local_auth: ^3.0.0
   
   # Camera & Files
   image_picker: ^1.0.7
-  file_picker: ^6.1.1
-  permission_handler: ^11.2.0
+  file_picker: ^10.3.8
+  permission_handler: ^12.0.1
   
   # Maps & Location
   google_maps_flutter: ^2.5.3
-  geolocator: ^10.1.0
-  geocoding: ^2.1.1
+  geolocator: ^14.0.2
+  geocoding: ^4.0.0
   
-  # Payments
-  flutter_paystack: ^1.0.7
+  # Payments (using native integration)
+  # flutter_paystack: ^1.0.7  # Commented - use direct API integration
   
   # Push Notifications
-  firebase_core: ^2.24.2
-  firebase_messaging: ^14.7.10
-  flutter_local_notifications: ^16.3.2
+  firebase_core: ^4.3.0
+  firebase_messaging: ^16.1.0
+  flutter_local_notifications: ^19.5.0
   
   # Analytics
-  firebase_analytics: ^10.7.4
+  firebase_analytics: ^12.1.0
   
   # Utilities
-  intl: ^0.19.0
+  intl: ^0.20.2
   uuid: ^4.3.1
   equatable: ^2.0.5
   json_annotation: ^4.8.1
   freezed_annotation: ^2.4.1
   url_launcher: ^6.2.4
-  share_plus: ^7.2.1
+  share_plus: ^12.0.1
   qr_flutter: ^4.1.0
-  mobile_scanner: ^4.0.1
+  mobile_scanner: ^7.1.4
   
   # Biometrics
   flutter_screen_lock: ^9.0.2
@@ -84,7 +84,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.1
+  flutter_lints: ^6.0.0
   build_runner: ^2.4.8
   retrofit_generator: ^8.1.0
   json_serializable: ^6.7.1
@@ -98,25 +98,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   
-  assets:
-    - assets/images/
-    - assets/icons/
-    - assets/fonts/
-  
-  fonts:
-    - family: Inter
-      fonts:
-        - asset: assets/fonts/Inter-Regular.ttf
-        - asset: assets/fonts/Inter-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/Inter-SemiBold.ttf
-          weight: 600
-        - asset: assets/fonts/Inter-Bold.ttf
-          weight: 700
-    - family: SpaceGrotesk
-      fonts:
-        - asset: assets/fonts/SpaceGrotesk-Regular.ttf
-        - asset: assets/fonts/SpaceGrotesk-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/SpaceGrotesk-Bold.ttf
-          weight: 700
+  # Assets will be added when available
+  # assets:
+  #   - assets/images/
+  #   - assets/icons/
+  #   - assets/fonts/

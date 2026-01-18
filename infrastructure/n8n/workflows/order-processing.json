@@ -1,0 +1,228 @@
+{
+    "name": "Order Processing Workflow",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "order-created",
+                "options": {}
+            },
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "http://inventory-service:8103/stock/check",
+                "options": {},
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "product_ids",
+                            "value": "={{$json[\"order\"][\"items\"].map(i => i.product_id)}}"
+                        }
+                    ]
+                }
+            },
+            "name": "Check Inventory",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                450,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "boolean": [
+                        {
+                            "value1": "={{$json[\"available\"]}}",
+                            "value2": true
+                        }
+                    ]
+                }
+            },
+            "name": "Inventory Available?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                650,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "http://payment-service:8084/payments/process",
+                "options": {},
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "order_id",
+                            "value": "={{$node[\"Webhook\"].json[\"order\"][\"id\"]}}"
+                        },
+                        {
+                            "name": "amount",
+                            "value": "={{$node[\"Webhook\"].json[\"order\"][\"total\"]}}"
+                        }
+                    ]
+                }
+            },
+            "name": "Process Payment",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                850,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "url": "http://gig-platform:8082/tasks/assign",
+                "options": {},
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "order_id",
+                            "value": "={{$node[\"Webhook\"].json[\"order\"][\"id\"]}}"
+                        },
+                        {
+                            "name": "type",
+                            "value": "delivery"
+                        }
+                    ]
+                }
+            },
+            "name": "Assign Worker",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                1050,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "url": "http://notification-service:8083/notifications/send",
+                "options": {},
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "type",
+                            "value": "order_confirmed"
+                        },
+                        {
+                            "name": "recipient",
+                            "value": "={{$node[\"Webhook\"].json[\"order\"][\"customer_id\"]}}"
+                        }
+                    ]
+                }
+            },
+            "name": "Send Confirmation",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                1250,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "url": "http://notification-service:8083/notifications/send",
+                "options": {},
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "type",
+                            "value": "order_failed"
+                        },
+                        {
+                            "name": "reason",
+                            "value": "out_of_stock"
+                        }
+                    ]
+                }
+            },
+            "name": "Notify Out of Stock",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                850,
+                400
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Check Inventory",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Check Inventory": {
+            "main": [
+                [
+                    {
+                        "node": "Inventory Available?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Inventory Available?": {
+            "main": [
+                [
+                    {
+                        "node": "Process Payment",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Notify Out of Stock",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Process Payment": {
+            "main": [
+                [
+                    {
+                        "node": "Assign Worker",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Assign Worker": {
+            "main": [
+                [
+                    {
+                        "node": "Send Confirmation",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

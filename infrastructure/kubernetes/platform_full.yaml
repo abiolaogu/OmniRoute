@@ -1,0 +1,754 @@
+# ============================================
+# OmniRoute Platform - Kubernetes Manifests
+# ============================================
+
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omniroute
+  labels:
+    app.kubernetes.io/name: omniroute
+    app.kubernetes.io/component: platform
+
+---
+# ConfigMap - Shared Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: omniroute-config
+  namespace: omniroute
+data:
+  LOG_LEVEL: "info"
+  CACHE_ENABLED: "true"
+  CACHE_TTL: "5m"
+  DEFAULT_CURRENCY: "NGN"
+  DEFAULT_TIMEZONE: "Africa/Lagos"
+  KAFKA_BROKERS: "kafka:9092"
+  REDIS_CLUSTER: "redis-cluster:6379"
+
+---
+# Secret - Sensitive Configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: omniroute-secrets
+  namespace: omniroute
+type: Opaque
+stringData:
+  DATABASE_URL: "postgres://user:password@postgres:5432/omniroute?sslmode=require"
+  REDIS_PASSWORD: "your-redis-password"
+  JWT_SECRET: "your-jwt-secret-key"
+  ENCRYPTION_KEY: "your-32-byte-encryption-key-here"
+  PAYSTACK_SECRET_KEY: "sk_live_xxxxx"
+  FLUTTERWAVE_SECRET_KEY: "FLWSECK_xxxxx"
+
+---
+# ============================================
+# Pricing Engine Deployment
+# ============================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pricing-engine
+  namespace: omniroute
+  labels:
+    app: pricing-engine
+    app.kubernetes.io/name: omniroute
+    app.kubernetes.io/component: pricing
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: pricing-engine
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: pricing-engine
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: omniroute-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: pricing-engine
+          image: omniroute/pricing-engine:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: omniroute-config
+            - secretRef:
+                name: omniroute-secrets
+          env:
+            - name: SERVICE_NAME
+              value: "pricing-engine"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: pricing-engine
+                topologyKey: kubernetes.io/hostname
+
+---
+# Pricing Engine Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: pricing-engine
+  namespace: omniroute
+  labels:
+    app: pricing-engine
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: pricing-engine
+
+---
+# Pricing Engine HPA
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: pricing-engine-hpa
+  namespace: omniroute
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pricing-engine
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+      selectPolicy: Max
+
+---
+# ============================================
+# Order Service Deployment
+# ============================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: omniroute
+  labels:
+    app: order-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      serviceAccountName: omniroute-service
+      containers:
+        - name: order-service
+          image: omniroute/order-service:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: omniroute-config
+            - secretRef:
+                name: omniroute-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+# Order Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: omniroute
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    app: order-service
+
+---
+# ============================================
+# Inventory Service Deployment
+# ============================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-service
+  namespace: omniroute
+  labels:
+    app: inventory-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: inventory-service
+  template:
+    metadata:
+      labels:
+        app: inventory-service
+    spec:
+      serviceAccountName: omniroute-service
+      containers:
+        - name: inventory-service
+          image: omniroute/inventory-service:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: omniroute-config
+            - secretRef:
+                name: omniroute-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+---
+# Inventory Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-service
+  namespace: omniroute
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    app: inventory-service
+
+---
+# ============================================
+# Gig Worker Service Deployment
+# ============================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gig-worker-service
+  namespace: omniroute
+  labels:
+    app: gig-worker-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: gig-worker-service
+  template:
+    metadata:
+      labels:
+        app: gig-worker-service
+    spec:
+      serviceAccountName: omniroute-service
+      containers:
+        - name: gig-worker-service
+          image: omniroute/gig-worker-service:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: omniroute-config
+            - secretRef:
+                name: omniroute-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+---
+# Gig Worker Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: gig-worker-service
+  namespace: omniroute
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    app: gig-worker-service
+
+---
+# ============================================
+# Payment Service Deployment
+# ============================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: omniroute
+  labels:
+    app: payment-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        app: payment-service
+    spec:
+      serviceAccountName: omniroute-service
+      containers:
+        - name: payment-service
+          image: omniroute/payment-service:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: omniroute-config
+            - secretRef:
+                name: omniroute-secrets
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+---
+# Payment Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: omniroute
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    app: payment-service
+
+---
+# ============================================
+# API Gateway (Kong)
+# ============================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: omniroute
+  labels:
+    app: api-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+        - name: kong
+          image: kong:3.5
+          ports:
+            - name: proxy
+              containerPort: 8000
+            - name: admin
+              containerPort: 8001
+          env:
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_DECLARATIVE_CONFIG
+              value: "/etc/kong/kong.yaml"
+            - name: KONG_PROXY_ACCESS_LOG
+              value: "/dev/stdout"
+            - name: KONG_ADMIN_ACCESS_LOG
+              value: "/dev/stdout"
+            - name: KONG_PROXY_ERROR_LOG
+              value: "/dev/stderr"
+            - name: KONG_ADMIN_ERROR_LOG
+              value: "/dev/stderr"
+          volumeMounts:
+            - name: kong-config
+              mountPath: /etc/kong
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+      volumes:
+        - name: kong-config
+          configMap:
+            name: kong-config
+
+---
+# Kong Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-config
+  namespace: omniroute
+data:
+  kong.yaml: |
+    _format_version: "3.0"
+    _transform: true
+
+    services:
+      - name: pricing-service
+        url: http://pricing-engine
+        routes:
+          - name: pricing-routes
+            paths:
+              - /api/v1/prices
+            strip_path: false
+
+      - name: order-service
+        url: http://order-service
+        routes:
+          - name: order-routes
+            paths:
+              - /api/v1/orders
+            strip_path: false
+
+      - name: inventory-service
+        url: http://inventory-service
+        routes:
+          - name: inventory-routes
+            paths:
+              - /api/v1/inventory
+              - /api/v1/locations
+            strip_path: false
+
+      - name: gig-worker-service
+        url: http://gig-worker-service
+        routes:
+          - name: gig-routes
+            paths:
+              - /api/v1/gig-workers
+              - /api/v1/gig-tasks
+            strip_path: false
+
+      - name: payment-service
+        url: http://payment-service
+        routes:
+          - name: payment-routes
+            paths:
+              - /api/v1/payments
+              - /api/v1/invoices
+              - /api/v1/wallets
+            strip_path: false
+
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 60
+          policy: local
+
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+            - X-Tenant-ID
+            - X-Request-ID
+
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - X-Gateway-Time:$(date)
+
+---
+# API Gateway Service (LoadBalancer)
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: omniroute
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+spec:
+  type: LoadBalancer
+  ports:
+    - name: proxy
+      port: 80
+      targetPort: proxy
+    - name: proxy-ssl
+      port: 443
+      targetPort: proxy
+  selector:
+    app: api-gateway
+
+---
+# ============================================
+# Ingress (Alternative to LoadBalancer)
+# ============================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: omniroute-ingress
+  namespace: omniroute
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+spec:
+  tls:
+    - hosts:
+        - api.omniroute.com
+      secretName: omniroute-tls
+  rules:
+    - host: api.omniroute.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 80
+
+---
+# ============================================
+# Service Account
+# ============================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: omniroute-service
+  namespace: omniroute
+
+---
+# RBAC Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: omniroute-role
+  namespace: omniroute
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+# RBAC RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: omniroute-rolebinding
+  namespace: omniroute
+subjects:
+  - kind: ServiceAccount
+    name: omniroute-service
+    namespace: omniroute
+roleRef:
+  kind: Role
+  name: omniroute-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ============================================
+# PodDisruptionBudget
+# ============================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pricing-engine-pdb
+  namespace: omniroute
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: pricing-engine
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: order-service-pdb
+  namespace: omniroute
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: order-service
+
+---
+# ============================================
+# Network Policy
+# ============================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: omniroute-network-policy
+  namespace: omniroute
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: omniroute
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: omniroute
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16

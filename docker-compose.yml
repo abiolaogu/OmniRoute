@@ -1,0 +1,569 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Infrastructure Services
+  # =============================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: omniroute-postgres
+    environment:
+      POSTGRES_USER: omniroute
+      POSTGRES_PASSWORD: omniroute_secret
+      POSTGRES_DB: omniroute
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U omniroute" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: omniroute-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: bitnami/kafka:3.6
+    container_name: omniroute-kafka
+    environment:
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/bitnami/kafka
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: omniroute-minio
+    environment:
+      MINIO_ROOT_USER: omniroute
+      MINIO_ROOT_PASSWORD: omniroute_secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+
+  # YugabyteDB - Distributed PostgreSQL-compatible database
+  yugabytedb:
+    image: yugabytedb/yugabyte:2.20.1.0-b97
+    container_name: omniroute-yugabytedb
+    command: [ "bin/yugabyted", "start", "--daemon=false" ]
+    ports:
+      - "5433:5433" # YSQL
+      - "9000:9000" # Master UI
+      - "7000:7000" # Master RPC
+    environment:
+      - YUGABYTE_DB=omniroute
+    volumes:
+      - yugabyte_data:/home/yugabyte/yb_data
+    profiles:
+      - distributed
+
+  # DragonflyDB - High-performance Redis-compatible cache
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.13.0
+    container_name: omniroute-dragonfly
+    ports:
+      - "6380:6379"
+    command: [ "--maxmemory", "2gb", "--proactor_threads", "2" ]
+    volumes:
+      - dragonfly_data:/data
+    profiles:
+      - distributed
+
+  # Redpanda - Kafka-compatible streaming platform
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v23.3.5
+    container_name: omniroute-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 1G
+      - --overprovisioned
+      - --kafka-addr PLAINTEXT://0.0.0.0:9093
+      - --advertise-kafka-addr PLAINTEXT://redpanda:9093
+      - --pandaproxy-addr 0.0.0.0:8082
+      - --advertise-pandaproxy-addr redpanda:8082
+      - --schema-registry-addr 0.0.0.0:8083
+    ports:
+      - "9093:9093" # Kafka API
+      - "8082:8082" # Pandaproxy
+      - "8083:8083" # Schema Registry
+      - "9644:9644" # Admin API
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    profiles:
+      - distributed
+
+  # Hasura GraphQL Engine
+  hasura:
+    image: hasura/graphql-engine:v2.36.0
+    container_name: omniroute-hasura
+    ports:
+      - "8080:8080"
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_ADMIN_SECRET: omniroute-admin-secret
+      HASURA_GRAPHQL_JWT_SECRET: '{"type":"HS256","key":"omniroute-jwt-secret-key-min-32-chars"}'
+      HASURA_GRAPHQL_UNAUTHORIZED_ROLE: anonymous
+      BANK_GATEWAY_URL: http://bank-gateway:8086
+      ATC_SERVICE_URL: http://atc-service:8087
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # Temporal Workflow Engine
+  temporal:
+    image: temporalio/auto-setup:1.22.0
+    container_name: omniroute-temporal
+    ports:
+      - "7233:7233"
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=omniroute
+      - POSTGRES_PWD=omniroute_secret
+      - POSTGRES_SEEDS=postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # =============================================================================
+  # Core Microservices
+  # =============================================================================
+
+  pricing-engine:
+    build:
+      context: ./services/pricing-engine
+      dockerfile: ../../infrastructure/docker/Dockerfile.pricing-engine
+    container_name: omniroute-pricing-engine
+    environment:
+      PORT: "8081"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+      CACHE_ENABLED: "true"
+      CACHE_TTL: 5m
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8081/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  gig-platform:
+    build:
+      context: ./services/gig-platform
+      dockerfile: ../../infrastructure/docker/Dockerfile.gig-platform
+    container_name: omniroute-gig-platform
+    environment:
+      PORT: "8082"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      LOG_LEVEL: info
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8082/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.notification-service
+    container_name: omniroute-notification-service
+    environment:
+      PORT: "8083"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      LOG_LEVEL: info
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8083/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  payment-service:
+    build:
+      context: ./services/payment-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.payment-service
+    container_name: omniroute-payment-service
+    environment:
+      PORT: "8084"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      LOG_LEVEL: info
+    ports:
+      - "8084:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8084/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # =============================================================================
+  # Observability Stack
+  # =============================================================================
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: omniroute-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: omniroute-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    container_name: omniroute-jaeger
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: "9411"
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"
+      - "14250:14250"
+      - "14268:14268"
+      - "14269:14269"
+      - "9411:9411"
+
+  # =============================================================================
+  # n8n Workflow Automation
+  # =============================================================================
+  n8n:
+    image: n8nio/n8n:1.22.0
+    container_name: omniroute-n8n
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678
+      GENERIC_TIMEZONE: Africa/Lagos
+      N8N_ENCRYPTION_KEY: omniroute-n8n-encryption-key
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: omniroute
+      DB_POSTGRESDB_PASSWORD: omniroute_secret
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./infrastructure/n8n/workflows:/home/node/workflows
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # =============================================================================
+  # Phase 1: Foundation Services
+  # =============================================================================
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.go
+    container_name: omniroute-auth-service
+    environment:
+      SERVER_PORT: "8100"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: omniroute-jwt-secret-key
+    ports:
+      - "8100:8100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+  catalog-service:
+    build:
+      context: ./services/catalog-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.go
+    container_name: omniroute-catalog-service
+    environment:
+      SERVER_PORT: "8101"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8101:8101"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+  order-service:
+    build:
+      context: ./services/order-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.go
+    container_name: omniroute-order-service
+    environment:
+      SERVER_PORT: "8102"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+      KAFKA_BROKERS: kafka:9092
+    ports:
+      - "8102:8102"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # =============================================================================
+  # Phase 2: Commerce Services
+  # =============================================================================
+  inventory-service:
+    build:
+      context: ./services/inventory-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.go
+    container_name: omniroute-inventory-service
+    environment:
+      SERVER_PORT: "8103"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8103:8103"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+  customer-service:
+    build:
+      context: ./services/customer-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.go
+    container_name: omniroute-customer-service
+    environment:
+      SERVER_PORT: "8104"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+    ports:
+      - "8104:8104"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+  analytics-service:
+    build:
+      context: ./services/analytics-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.go
+    container_name: omniroute-analytics-service
+    environment:
+      SERVER_PORT: "8105"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+    ports:
+      - "8105:8105"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # =============================================================================
+  # Phase 3: Logistics Services
+  # =============================================================================
+  fleet-service:
+    build:
+      context: ./services/fleet-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.go
+    container_name: omniroute-fleet-service
+    environment:
+      SERVER_PORT: "8106"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+    ports:
+      - "8106:8106"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # =============================================================================
+  # Phase 4: Intelligence Services (Python)
+  # =============================================================================
+  forecasting-service:
+    build:
+      context: ./services/forecasting-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.python
+    container_name: omniroute-forecasting-service
+    environment:
+      PORT: "8107"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+    ports:
+      - "8107:8107"
+    profiles:
+      - full
+
+  credit-scoring-service:
+    build:
+      context: ./services/credit-scoring-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.python
+    container_name: omniroute-credit-scoring-service
+    environment:
+      PORT: "8108"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+    ports:
+      - "8108:8108"
+    profiles:
+      - full
+
+  recommendations-service:
+    build:
+      context: ./services/recommendations-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.python
+    container_name: omniroute-recommendations-service
+    environment:
+      PORT: "8109"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+    ports:
+      - "8109:8109"
+    profiles:
+      - full
+
+  market-intel-service:
+    build:
+      context: ./services/market-intel-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.go
+    container_name: omniroute-market-intel-service
+    environment:
+      SERVER_PORT: "8110"
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+    ports:
+      - "8110:8110"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # =============================================================================
+  # MCP Server (AI Integration Layer)
+  # =============================================================================
+  mcp-server:
+    build:
+      context: ./services/mcp-server
+      dockerfile: ../../infrastructure/docker/Dockerfile.go
+    container_name: omniroute-mcp-server
+    environment:
+      SERVER_PORT: "8200"
+      HASURA_ENDPOINT: http://hasura:8080/v1/graphql
+      HASURA_ADMIN_SECRET: ${HASURA_ADMIN_SECRET:-omniroute_secret}
+      N8N_ENDPOINT: http://n8n:5678
+      N8N_API_KEY: ${N8N_API_KEY}
+      TEMPORAL_HOST: temporal:7233
+      TEMPORAL_NAMESPACE: omniroute
+      DATABASE_URL: postgres://omniroute:omniroute_secret@postgres:5432/omniroute
+    ports:
+      - "8200:8200"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+  yugabyte_data:
+  dragonfly_data:
+  redpanda_data:
+  n8n_data:
+
+
+networks:
+  default:
+    name: omniroute-network

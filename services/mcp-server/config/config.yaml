@@ -1,0 +1,120 @@
+# MCP Server Configuration
+# Model Context Protocol server for AI assistant integration
+
+server:
+  port: 8200
+  host: "0.0.0.0"
+  read_timeout: 30s
+  write_timeout: 30s
+
+# MCP Protocol Configuration
+mcp:
+  version: "2024-11-05"
+  server_name: "OmniRoute MCP Server"
+  server_version: "1.0.0"
+
+# Hasura GraphQL Integration
+hasura:
+  endpoint: "${HASURA_ENDPOINT:-http://hasura:8080/v1/graphql}"
+  admin_secret: "${HASURA_ADMIN_SECRET}"
+  timeout: 30s
+  max_retries: 3
+
+# n8n Workflow Automation Integration  
+n8n:
+  endpoint: "${N8N_ENDPOINT:-http://n8n:5678}"
+  api_key: "${N8N_API_KEY}"
+  webhook_base_url: "http://n8n:5678/webhook"
+  workflows:
+    order_processing: "order-processing"
+    low_stock_alert: "low-stock-alert"
+    payment_reconciliation: "payment-reconciliation"
+    customer_onboarding: "customer-onboarding"
+    worker_payout: "worker-payout"
+
+# Temporal Workflow Orchestration Integration
+temporal:
+  host: "${TEMPORAL_HOST:-temporal:7233}"
+  namespace: "${TEMPORAL_NAMESPACE:-omniroute}"
+  task_queue: "omniroute-tasks"
+  workflows:
+    order_processing:
+      name: "OrderProcessingWorkflow"
+      task_queue: "orders"
+    credit_review:
+      name: "CreditReviewWorkflow"
+      task_queue: "credit"
+    worker_payout:
+      name: "WorkerPayoutWorkflow"
+      task_queue: "payouts"
+
+# Service Endpoints (for tool execution)
+services:
+  pricing_engine: "${PRICING_ENGINE_URL:-http://pricing-engine:8081}"
+  order_service: "${ORDER_SERVICE_URL:-http://order-service:8102}"
+  inventory_service: "${INVENTORY_SERVICE_URL:-http://inventory-service:8103}"
+  customer_service: "${CUSTOMER_SERVICE_URL:-http://customer-service:8104}"
+  analytics_service: "${ANALYTICS_SERVICE_URL:-http://analytics-service:8105}"
+  fleet_service: "${FLEET_SERVICE_URL:-http://fleet-service:8106}"
+  forecasting_service: "${FORECASTING_SERVICE_URL:-http://forecasting-service:8107}"
+  credit_scoring_service: "${CREDIT_SCORING_URL:-http://credit-scoring-service:8108}"
+  recommendations_service: "${RECOMMENDATIONS_URL:-http://recommendations-service:8109}"
+  gig_platform: "${GIG_PLATFORM_URL:-http://gig-platform:8082}"
+
+# Authentication
+auth:
+  jwt_secret: "${JWT_SECRET}"
+  api_key_header: "X-API-Key"
+  allowed_origins:
+    - "http://localhost:*"
+    - "https://*.omniroute.io"
+
+# Rate Limiting
+rate_limit:
+  requests_per_second: 100
+  burst_size: 200
+
+# Logging
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
+
+# Metrics
+metrics:
+  enabled: true
+  path: "/metrics"
+  port: 9090
+
+# Tool Configuration
+tools:
+  # Which tools are enabled
+  enabled:
+    - create_order
+    - get_order
+    - cancel_order
+    - search_products
+    - get_product
+    - check_inventory
+    - get_customer
+    - get_customer_credit
+    - calculate_price
+    - get_sales_report
+    - get_demand_forecast
+    - trigger_workflow
+    - start_order_workflow
+    - start_credit_review
+    - track_vehicle
+    - assign_worker
+    - get_recommendations
+  
+  # Per-tool rate limits
+  limits:
+    create_order: 10/min
+    trigger_workflow: 20/min
+    default: 100/min
+
+# Resource Configuration
+resources:
+  cache_ttl: 60s
+  refresh_interval: 30s

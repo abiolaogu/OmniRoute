@@ -1,0 +1,343 @@
+# Hasura Metadata Configuration
+# Main configuration file for Hasura GraphQL Engine
+
+version: 3
+metadata:
+  sources:
+    - name: omniroute
+      kind: postgres
+      configuration:
+        connection_info:
+          database_url:
+            from_env: DATABASE_URL
+          pool_settings:
+            idle_timeout: 180
+            max_connections: 50
+            retries: 1
+      tables:
+        # Auth Service Tables
+        - table:
+            name: tenants
+            schema: public
+          object_relationships: []
+          array_relationships:
+            - name: users
+              using:
+                foreign_key_constraint_on:
+                  column: tenant_id
+                  table:
+                    name: users
+                    schema: public
+          select_permissions:
+            - role: tenant_admin
+              permission:
+                columns: "*"
+                filter:
+                  id:
+                    _eq: X-Hasura-Tenant-Id
+            - role: user
+              permission:
+                columns: [id, name, slug]
+                filter:
+                  id:
+                    _eq: X-Hasura-Tenant-Id
+
+        - table:
+            name: users
+            schema: public
+          object_relationships:
+            - name: tenant
+              using:
+                foreign_key_constraint_on: tenant_id
+          select_permissions:
+            - role: tenant_admin
+              permission:
+                columns: "*"
+                filter:
+                  tenant_id:
+                    _eq: X-Hasura-Tenant-Id
+            - role: user
+              permission:
+                columns: [id, email, first_name, last_name, status]
+                filter:
+                  id:
+                    _eq: X-Hasura-User-Id
+
+        # Catalog Service Tables
+        - table:
+            name: categories
+            schema: public
+          object_relationships:
+            - name: parent
+              using:
+                foreign_key_constraint_on: parent_id
+          array_relationships:
+            - name: products
+              using:
+                foreign_key_constraint_on:
+                  column: category_id
+                  table:
+                    name: products
+                    schema: public
+            - name: subcategories
+              using:
+                foreign_key_constraint_on:
+                  column: parent_id
+                  table:
+                    name: categories
+                    schema: public
+          select_permissions:
+            - role: user
+              permission:
+                columns: "*"
+                filter:
+                  tenant_id:
+                    _eq: X-Hasura-Tenant-Id
+                  is_active:
+                    _eq: true
+
+        - table:
+            name: products
+            schema: public
+          object_relationships:
+            - name: category
+              using:
+                foreign_key_constraint_on: category_id
+            - name: brand
+              using:
+                foreign_key_constraint_on: brand_id
+          array_relationships:
+            - name: variants
+              using:
+                foreign_key_constraint_on:
+                  column: product_id
+                  table:
+                    name: product_variants
+                    schema: public
+            - name: media
+              using:
+                foreign_key_constraint_on:
+                  column: product_id
+                  table:
+                    name: product_media
+                    schema: public
+          select_permissions:
+            - role: user
+              permission:
+                columns: "*"
+                filter:
+                  tenant_id:
+                    _eq: X-Hasura-Tenant-Id
+                  is_active:
+                    _eq: true
+          insert_permissions:
+            - role: tenant_admin
+              permission:
+                columns: [name, sku, slug, description, base_price, category_id, brand_id]
+                check:
+                  tenant_id:
+                    _eq: X-Hasura-Tenant-Id
+                set:
+                  tenant_id: X-Hasura-Tenant-Id
+
+        # Order Service Tables
+        - table:
+            name: orders
+            schema: public
+          object_relationships:
+            - name: customer
+              using:
+                manual_configuration:
+                  column_mapping:
+                    customer_id: id
+                  remote_table:
+                    name: customers
+                    schema: public
+          array_relationships:
+            - name: items
+              using:
+                foreign_key_constraint_on:
+                  column: order_id
+                  table:
+                    name: order_items
+                    schema: public
+            - name: history
+              using:
+                foreign_key_constraint_on:
+                  column: order_id
+                  table:
+                    name: order_history
+                    schema: public
+          select_permissions:
+            - role: user
+              permission:
+                columns: "*"
+                filter:
+                  tenant_id:
+                    _eq: X-Hasura-Tenant-Id
+            - role: customer
+              permission:
+                columns: [id, order_number, status, total_amount, created_at]
+                filter:
+                  customer_id:
+                    _eq: X-Hasura-Customer-Id
+
+        # Customer Service Tables
+        - table:
+            name: customers
+            schema: public
+          array_relationships:
+            - name: addresses
+              using:
+                foreign_key_constraint_on:
+                  column: customer_id
+                  table:
+                    name: customer_addresses
+                    schema: public
+            - name: orders
+              using:
+                manual_configuration:
+                  column_mapping:
+                    id: customer_id
+                  remote_table:
+                    name: orders
+                    schema: public
+          select_permissions:
+            - role: tenant_admin
+              permission:
+                columns: "*"
+                filter:
+                  tenant_id:
+                    _eq: X-Hasura-Tenant-Id
+            - role: customer
+              permission:
+                columns: [id, email, first_name, last_name, phone]
+                filter:
+                  id:
+                    _eq: X-Hasura-Customer-Id
+
+        # Stock Levels
+        - table:
+            name: stock_levels
+            schema: public
+          select_permissions:
+            - role: user
+              permission:
+                columns: [product_id, variant_id, quantity_available]
+                filter:
+                  tenant_id:
+                    _eq: X-Hasura-Tenant-Id
+
+  actions:
+    - name: CreateOrder
+      definition:
+        kind: synchronous
+        handler: "{{ORDER_SERVICE_URL}}/actions/create-order"
+        forward_client_headers: true
+        request_transform:
+          body:
+            action: transform
+            template: |
+              {
+                "customer_id": {{$body.input.customer_id}},
+                "items": {{$body.input.items}},
+                "shipping_address": {{$body.input.shipping_address}}
+              }
+      permissions:
+        - role: user
+        - role: customer
+
+    - name: CalculatePrice
+      definition:
+        kind: synchronous
+        handler: "{{PRICING_SERVICE_URL}}/actions/calculate-price"
+        forward_client_headers: true
+      permissions:
+        - role: user
+        - role: customer
+
+    - name: CheckInventory
+      definition:
+        kind: synchronous
+        handler: "{{INVENTORY_SERVICE_URL}}/actions/check-availability"
+        forward_client_headers: true
+      permissions:
+        - role: user
+        - role: tenant_admin
+
+    - name: GetCreditScore
+      definition:
+        kind: synchronous
+        handler: "{{CREDIT_SCORING_URL}}/score"
+        method: POST
+        forward_client_headers: true
+      permissions:
+        - role: tenant_admin
+
+    - name: GetRecommendations
+      definition:
+        kind: synchronous
+        handler: "{{RECOMMENDATIONS_URL}}/products"
+        method: POST
+        forward_client_headers: true
+      permissions:
+        - role: user
+        - role: customer
+
+    - name: GetDemandForecast
+      definition:
+        kind: synchronous
+        handler: "{{FORECASTING_URL}}/forecast"
+        method: POST
+        forward_client_headers: true
+      permissions:
+        - role: tenant_admin
+
+  custom_types:
+    input_objects:
+      - name: OrderItemInput
+        fields:
+          - name: product_id
+            type: uuid!
+          - name: variant_id
+            type: uuid
+          - name: quantity
+            type: Int!
+      - name: AddressInput
+        fields:
+          - name: street_address
+            type: String!
+          - name: city
+            type: String!
+          - name: state
+            type: String
+          - name: postal_code
+            type: String
+          - name: country
+            type: String!
+
+    objects:
+      - name: OrderResult
+        fields:
+          - name: order_id
+            type: uuid!
+          - name: order_number
+            type: String!
+          - name: status
+            type: String!
+          - name: total_amount
+            type: float8!
+
+      - name: PriceResult
+        fields:
+          - name: base_price
+            type: float8!
+          - name: discount_amount
+            type: float8!
+          - name: tax_amount
+            type: float8!
+          - name: total_price
+            type: float8!
+
+  remote_schemas: []
+  inherited_roles: []

@@ -1,0 +1,458 @@
+# All OmniRoute Services Deployment
+# Optimized for Harvester HCI with Longhorn storage
+
+---
+# Auth Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: omniroute
+  labels:
+    app: auth-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      containers:
+      - name: auth-service
+        image: omniroute/auth-service:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: omniroute-config
+        - secretRef:
+            name: omniroute-db-secrets
+        - secretRef:
+            name: omniroute-api-secrets
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: omniroute
+spec:
+  selector:
+    app: auth-service
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+---
+# Order Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: omniroute
+  labels:
+    app: order-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      containers:
+      - name: order-service
+        image: omniroute/order-service:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: omniroute-config
+        - secretRef:
+            name: omniroute-db-secrets
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: omniroute
+spec:
+  selector:
+    app: order-service
+  ports:
+  - port: 8080
+    targetPort: 8080
+
+---
+# Payment Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: omniroute
+  labels:
+    app: payment-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        app: payment-service
+    spec:
+      containers:
+      - name: payment-service
+        image: omniroute/payment-service:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: omniroute-config
+        - secretRef:
+            name: omniroute-db-secrets
+        - secretRef:
+            name: omniroute-external-secrets
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: omniroute
+spec:
+  selector:
+    app: payment-service
+  ports:
+  - port: 8080
+    targetPort: 8080
+
+---
+# Inventory Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-service
+  namespace: omniroute
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: inventory-service
+  template:
+    metadata:
+      labels:
+        app: inventory-service
+    spec:
+      containers:
+      - name: inventory-service
+        image: omniroute/inventory-service:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: omniroute-config
+        - secretRef:
+            name: omniroute-db-secrets
+        resources:
+          requests:
+            cpu: "150m"
+            memory: "192Mi"
+          limits:
+            cpu: "750m"
+            memory: "768Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-service
+  namespace: omniroute
+spec:
+  selector:
+    app: inventory-service
+  ports:
+  - port: 8080
+    targetPort: 8080
+
+---
+# MCP Server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-server
+  namespace: omniroute
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mcp-server
+  template:
+    metadata:
+      labels:
+        app: mcp-server
+    spec:
+      containers:
+      - name: mcp-server
+        image: omniroute/mcp-server:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: omniroute-config
+        - secretRef:
+            name: omniroute-api-secrets
+        - secretRef:
+            name: omniroute-temporal-secrets
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-server
+  namespace: omniroute
+spec:
+  selector:
+    app: mcp-server
+  ports:
+  - port: 8080
+    targetPort: 8080
+
+---
+# AI Gateway (Python)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-gateway
+  namespace: omniroute
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-gateway
+  template:
+    metadata:
+      labels:
+        app: ai-gateway
+    spec:
+      containers:
+      - name: ai-gateway
+        image: omniroute/ai-gateway:latest
+        ports:
+        - containerPort: 8140
+        envFrom:
+        - configMapRef:
+            name: omniroute-config
+        - secretRef:
+            name: omniroute-external-secrets
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-gateway
+  namespace: omniroute
+spec:
+  selector:
+    app: ai-gateway
+  ports:
+  - port: 8140
+    targetPort: 8140
+
+---
+# Workflow Compiler (Rust)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workflow-compiler
+  namespace: omniroute
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: workflow-compiler
+  template:
+    metadata:
+      labels:
+        app: workflow-compiler
+    spec:
+      containers:
+      - name: workflow-compiler
+        image: omniroute/workflow-compiler:latest
+        ports:
+        - containerPort: 8130
+        envFrom:
+        - configMapRef:
+            name: omniroute-config
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workflow-compiler
+  namespace: omniroute
+spec:
+  selector:
+    app: workflow-compiler
+  ports:
+  - port: 8130
+    targetPort: 8130
+
+---
+# SCE Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sce-service
+  namespace: omniroute
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sce-service
+  template:
+    metadata:
+      labels:
+        app: sce-service
+    spec:
+      containers:
+      - name: sce-service
+        image: omniroute/sce-service:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: omniroute-config
+        - secretRef:
+            name: omniroute-db-secrets
+        - secretRef:
+            name: omniroute-temporal-secrets
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sce-service
+  namespace: omniroute
+spec:
+  selector:
+    app: sce-service
+  ports:
+  - port: 8080
+    targetPort: 8080
+
+---
+# Bank Gateway
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bank-gateway
+  namespace: omniroute
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bank-gateway
+  template:
+    metadata:
+      labels:
+        app: bank-gateway
+    spec:
+      containers:
+      - name: bank-gateway
+        image: omniroute/bank-gateway:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: omniroute-config
+        - secretRef:
+            name: omniroute-db-secrets
+        - secretRef:
+            name: omniroute-external-secrets
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bank-gateway
+  namespace: omniroute
+spec:
+  selector:
+    app: bank-gateway
+  ports:
+  - port: 8080
+    targetPort: 8080

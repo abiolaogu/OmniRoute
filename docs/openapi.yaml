@@ -1,0 +1,592 @@
+openapi: 3.1.0
+info:
+  title: OmniRoute Commerce Platform API
+  description: |
+    Enterprise-grade B2B FMCG commerce platform combining multi-channel ordering,
+    embedded finance, and gig economy logistics.
+  version: 1.0.0
+  contact:
+    name: OmniRoute Team
+    email: api@omniroute.io
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.omniroute.io/v1
+    description: Production
+  - url: https://staging-api.omniroute.io/v1
+    description: Staging
+  - url: http://localhost:8080/v1
+    description: Local Development
+
+tags:
+  - name: Pricing
+    description: Dynamic B2B pricing operations
+  - name: Workers
+    description: Gig worker management
+  - name: Tasks
+    description: Task and delivery management
+  - name: Notifications
+    description: Multi-channel notification operations
+  - name: Payments
+    description: Payment processing and wallets
+  - name: Credit
+    description: Credit accounts and scoring
+  - name: Services
+    description: Service Creation Environment
+
+paths:
+  # Pricing Engine
+  /pricing/calculate:
+    post:
+      tags: [Pricing]
+      summary: Calculate prices for products
+      operationId: calculatePrices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PriceRequest'
+      responses:
+        '200':
+          description: Calculated prices
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # Gig Platform
+  /workers:
+    get:
+      tags: [Workers]
+      summary: List workers
+      operationId: listWorkers
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [available, busy, offline]
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/PageOffset'
+      responses:
+        '200':
+          description: List of workers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerList'
+    post:
+      tags: [Workers]
+      summary: Register a new worker
+      operationId: createWorker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkerRequest'
+      responses:
+        '201':
+          description: Worker created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Worker'
+
+  /tasks:
+    get:
+      tags: [Tasks]
+      summary: List tasks
+      operationId: listTasks
+      responses:
+        '200':
+          description: List of tasks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskList'
+    post:
+      tags: [Tasks]
+      summary: Create a new task
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+
+  # Notifications
+  /notifications:
+    post:
+      tags: [Notifications]
+      summary: Send a notification
+      operationId: sendNotification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationRequest'
+      responses:
+        '202':
+          description: Notification queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+
+  # Payments
+  /payments:
+    post:
+      tags: [Payments]
+      summary: Create a payment
+      operationId: createPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRequest'
+      responses:
+        '201':
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+
+  /wallets/{customerId}:
+    get:
+      tags: [Payments]
+      summary: Get customer wallet
+      operationId: getWallet
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Wallet details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wallet'
+
+  # Credit
+  /credit-accounts/{customerId}:
+    get:
+      tags: [Credit]
+      summary: Get credit account
+      operationId: getCreditAccount
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Credit account details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditAccount'
+
+  /credit-scores/{customerId}:
+    get:
+      tags: [Credit]
+      summary: Get credit score
+      operationId: getCreditScore
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Credit score details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditScore'
+
+  # SCE
+  /services:
+    get:
+      tags: [Services]
+      summary: List service definitions
+      operationId: listServices
+      responses:
+        '200':
+          description: List of services
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceList'
+    post:
+      tags: [Services]
+      summary: Create a service definition
+      operationId: createService
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateServiceRequest'
+      responses:
+        '201':
+          description: Service created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceDefinition'
+
+  /services/{serviceId}/execute:
+    post:
+      tags: [Services]
+      summary: Execute a service
+      operationId: executeService
+      parameters:
+        - name: serviceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteServiceRequest'
+      responses:
+        '202':
+          description: Service execution started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResponse'
+
+components:
+  parameters:
+    PageLimit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 20
+        maximum: 100
+    PageOffset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        default: 0
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    PriceRequest:
+      type: object
+      required: [tenant_id, customer_id, items]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+
+    PriceResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              unit_price:
+                type: string
+              total_price:
+                type: string
+              discounts:
+                type: array
+                items:
+                  type: object
+
+    Worker:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        status:
+          type: string
+          enum: [available, busy, offline]
+        type:
+          type: string
+          enum: [delivery, sales, collection]
+        rating:
+          type: number
+
+    WorkerList:
+      type: object
+      properties:
+        workers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Worker'
+        total:
+          type: integer
+
+    CreateWorkerRequest:
+      type: object
+      required: [first_name, last_name, phone, type]
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        type:
+          type: string
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        status:
+          type: string
+        priority:
+          type: integer
+        assigned_worker_id:
+          type: string
+          format: uuid
+
+    TaskList:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+
+    CreateTaskRequest:
+      type: object
+      required: [type, order_id]
+      properties:
+        type:
+          type: string
+        order_id:
+          type: string
+          format: uuid
+
+    NotificationRequest:
+      type: object
+      required: [channel, recipient_address, body]
+      properties:
+        channel:
+          type: string
+          enum: [sms, email, whatsapp, push]
+        recipient_address:
+          type: string
+        template_id:
+          type: string
+          format: uuid
+        body:
+          type: string
+        data:
+          type: object
+
+    NotificationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+
+    PaymentRequest:
+      type: object
+      required: [customer_id, amount, method]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+        method:
+          type: string
+          enum: [card, bank_transfer, ussd, mobile_money, wallet]
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        amount:
+          type: string
+
+    Wallet:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        balance:
+          type: string
+        status:
+          type: string
+
+    CreditAccount:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        credit_limit:
+          type: string
+        available_credit:
+          type: string
+        outstanding_balance:
+          type: string
+
+    CreditScore:
+      type: object
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        score:
+          type: integer
+        rating:
+          type: string
+          enum: [excellent, good, fair, poor]
+
+    ServiceDefinition:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [draft, published, deprecated]
+
+    ServiceList:
+      type: object
+      properties:
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceDefinition'
+
+    CreateServiceRequest:
+      type: object
+      required: [name, category]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+
+    ExecuteServiceRequest:
+      type: object
+      properties:
+        input_data:
+          type: object
+
+    ExecutionResponse:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        status:
+          type: string
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+security:
+  - bearerAuth: []
+  - apiKey: []
